@@ -1,0 +1,1083 @@
+import hmac
+import hashlib
+from pydantic import BaseModel
+
+from collections import defaultdict
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+from weather_service import get_weather_forecast
+from solar_service import get_solar_forecast
+from load_forecast_service import get_load_forecast
+from energy_forecast_service import get_energy_forecast
+from mpc_optimizer import optimize_energy_plan
+from mpc_scenario_service import run_mpc_scenarios
+from electricity_price_service import get_electricity_price_forecast
+from alert_service import get_alerts
+from device_service import get_devices
+from energy_service import get_energy_history
+from security_service import get_security_events
+
+from dashboard_service import (
+    get_dashboard_status
+)
+from ai_recommendation_service import (
+    generate_energy_recommendations
+)
+from battery_stress_scenario_service import (
+    run_battery_stress_scenario
+)
+from fair_mpc_benchmark_service import (
+    run_fair_mpc_benchmark
+)
+from battery_mpc_comparison_service import (
+    compare_ml_battery_strategies
+)
+from battery_aware_ml_mpc import (
+    optimize_battery_aware_ml_mpc
+)
+from ml_advanced_mpc_service import (
+    optimize_ml_advanced_mpc
+)
+from ml_energy_forecast_service import (
+    get_ml_energy_forecast
+)
+from ml_data_service import (
+    get_ml_data_status
+)
+from ml_load_forecast_service import (
+    get_ml_load_forecast
+)
+from anomaly_detection_service import (
+    detect_energy_anomalies,
+    get_current_ai_status
+)
+from economic_mpc_optimizer import (
+    optimize_economic_energy_plan
+)
+from advanced_economic_mpc import (
+    optimize_advanced_economic_mpc
+)
+from optimization_comparison_service import (
+    compare_optimization_models
+)
+from smart_planner import (
+    build_smart_plan,
+    build_room_plans,
+    build_planning_recommendations,
+    build_planning_health,
+)
+
+import models
+from config import settings
+from database import SessionLocal, engine
+
+from monte_carlo_service import monte_carlo_prediction
+from models import EnergyReading
+
+import random
+
+
+#models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Smart Energy API")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class IngestReadingRequest(BaseModel):
+    device_id: str
+    room_id: str
+    energy: float
+    timestamp: str
+    signature: str
+
+
+def build_signing_string(payload: dict) -> str:
+    return f"{payload['device_id']}|{payload['room_id']}|{payload['energy']}|{payload['timestamp']}"
+
+
+def generate_expected_signature(payload: dict) -> str:
+    signing_string = build_signing_string(payload)
+    return hmac.new(
+        settings.message_secret.encode(),
+        signing_string.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+
+def validate_http_reading(payload: dict):
+    device_id = payload["device_id"]
+    room_id = payload["room_id"]
+    energy = payload["energy"]
+    timestamp = payload["timestamp"]
+    provided_signature = payload["signature"]
+
+    if device_id not in settings.trusted_devices:
+        raise HTTPException(status_code=400, detail=f"Unknown device_id: {device_id}")
+
+    if room_id not in settings.allowed_rooms:
+        raise HTTPException(status_code=400, detail=f"Unknown room_id: {room_id}")
+
+    try:
+        datetime.fromisoformat(timestamp)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid timestamp format: {timestamp}")
+
+    min_energy, max_energy = settings.allowed_rooms[room_id]
+    if not (min_energy <= energy <= max_energy):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Energy out of allowed range for {room_id}: {energy} not in [{min_energy}, {max_energy}]"
+        )
+
+    expected_signature = generate_expected_signature(payload)
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        raise HTTPException(status_code=401, detail="Invalid message signature")
+
+
+@app.post("/ingest/reading")
+def ingest_reading(
+    reading: IngestReadingRequest,
+    x_api_key: str = Header(default="")
+):
+    if x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    payload = reading.model_dump()
+    validate_http_reading(payload)
+
+    db: Session = SessionLocal()
+    try:
+        parsed_timestamp = datetime.fromisoformat(reading.timestamp)
+
+
+        data_source = (
+            "simulator"
+            if reading.device_id.startswith(
+                "simulator_"
+            )
+            else "sensor"
+        )
+
+        db_reading = models.EnergyReading(
+            device_id=reading.device_id,
+            room_id=reading.room_id,
+            energy=reading.energy,
+            timestamp=parsed_timestamp,
+            data_source=data_source
+        )
+        db.add(db_reading)
+        db.commit()
+        db.refresh(db_reading)
+
+        return {
+            "status": "ok",
+            "message": "Reading saved successfully",
+            "id": db_reading.id,
+            "room_id": db_reading.room_id,
+            "energy": db_reading.energy,
+            "timestamp": db_reading.timestamp.isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+#models.Base.metadata.create_all(bind=engine)
+
+#app.include_router(router)
+
+BUILDING_ROOM_MAP = {
+    "building_1": {
+        "name": "Main Tower",
+        "rooms": ["room_1", "room_2"],
+    },
+    "building_2": {
+        "name": "Smart Annex",
+        "rooms": ["room_3"],
+    },
+}
+
+DEVICE_ROOM_MAP = {
+    "simulator_01": {
+        "room_id": "room_1",
+        "building_id": "building_1",
+    },
+    "simulator_02": {
+        "room_id": "room_2",
+        "building_id": "building_1",
+    },
+    "simulator_03": {
+        "room_id": "room_3",
+        "building_id": "building_2",
+    },
+}
+
+
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "message": "Smart Energy backend is running - render v2"
+    }
+
+def get_recent_readings(minutes: int = 60):
+    db = SessionLocal()
+    try:
+        since_time = datetime.now() - timedelta(minutes=minutes)
+        rows = (
+            db.query(models.EnergyReading)
+            .filter(models.EnergyReading.timestamp >= since_time)
+            .order_by(models.EnergyReading.timestamp.desc())
+            .all()
+        )
+        return rows
+    finally:
+        db.close()
+
+
+def get_room_stats(minutes: int = 60):
+    db = SessionLocal()
+    try:
+        since_time = datetime.now() - timedelta(minutes=minutes)
+
+        rows = (
+            db.query(
+                models.EnergyReading.room_id,
+                func.avg(models.EnergyReading.energy).label("avg_energy"),
+                func.count(models.EnergyReading.id).label("reading_count"),
+                func.max(models.EnergyReading.timestamp).label("last_seen"),
+            )
+            .filter(models.EnergyReading.timestamp >= since_time)
+            .group_by(models.EnergyReading.room_id)
+            .all()
+        )
+
+        room_stats = {}
+        for row in rows:
+            avg_energy = round(float(row.avg_energy or 0), 2)
+            reading_count = int(row.reading_count or 0)
+            total_energy = round(avg_energy * reading_count, 2)
+
+            if avg_energy >= 3.5:
+                status_level = "High"
+            elif avg_energy >= 2.3:
+                status_level = "Medium"
+            else:
+                status_level = "Low"
+
+            estimated_cost = round(total_energy * 0.45, 2)
+            utilization_percent = min(100, round((avg_energy / 5.0) * 100, 2))
+
+            room_stats[row.room_id] = {
+                "room_id": row.room_id,
+                "average_energy": avg_energy,
+                "reading_count": reading_count,
+                "total_energy": total_energy,
+                "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+                "status_level": status_level,
+                "estimated_cost": estimated_cost,
+                "utilization_percent": utilization_percent,
+            }
+
+        # Fill missing rooms
+        all_rooms = sorted(
+            {room for b in BUILDING_ROOM_MAP.values() for room in b["rooms"]}
+        )
+        for room_id in all_rooms:
+            room_stats.setdefault(
+                room_id,
+                {
+                    "room_id": room_id,
+                    "average_energy": 0.0,
+                    "reading_count": 0,
+                    "total_energy": 0.0,
+                    "last_seen": None,
+                    "status_level": "No Data",
+                    "estimated_cost": 0.0,
+                    "utilization_percent": 0.0,
+                },
+            )
+
+        return room_stats
+    finally:
+        db.close()
+
+
+def build_buildings_summary(minutes: int = 60):
+    room_stats = get_room_stats(minutes)
+    buildings = []
+
+    for building_id, info in BUILDING_ROOM_MAP.items():
+        rooms = [room_stats[rid] for rid in info["rooms"]]
+        room_count = len(rooms)
+        total_energy = round(sum(r["total_energy"] for r in rooms), 2)
+        avg_energy = round(
+            sum(r["average_energy"] for r in rooms) / room_count if room_count else 0,
+            2,
+        )
+
+        if avg_energy >= 3.5:
+            status = "High Load"
+        elif avg_energy >= 2.3:
+            status = "Balanced"
+        else:
+            status = "Efficient"
+
+        buildings.append(
+            {
+                "building_id": building_id,
+                "name": info["name"],
+                "room_count": room_count,
+                "total_energy": total_energy,
+                "average_energy": avg_energy,
+                "status": status,
+                "rooms": rooms,
+            }
+        )
+
+    return buildings
+
+
+@app.get("/mobile/home")
+def mobile_home():
+    room_stats = get_room_stats(minutes=60)
+    rooms = list(room_stats.values())
+
+    top_consumer = max(rooms, key=lambda r: r["average_energy"], default=None)
+    total_cost = round(sum(r["estimated_cost"] for r in rooms), 2)
+
+    high_risk_count = len([r for r in rooms if r["average_energy"] >= 3.5])
+    medium_risk_count = len([r for r in rooms if 2.3 <= r["average_energy"] < 3.5])
+
+    total_alerts = high_risk_count + medium_risk_count
+
+    system_status = "Healthy"
+    if high_risk_count > 0:
+        system_status = "Warning"
+    elif medium_risk_count > 0:
+        system_status = "Attention"
+
+    return {
+        "system_status": system_status,
+        "summary": {
+            "total_cost": total_cost,
+            "total_alerts": total_alerts,
+            "medium_risk_count": medium_risk_count,
+            "high_risk_count": high_risk_count,
+            "top_consumer": {
+                "room_id": top_consumer["room_id"] if top_consumer else "-",
+                "average_energy": top_consumer["average_energy"] if top_consumer else 0,
+            },
+        },
+    }
+
+
+@app.get("/mobile/rooms")
+def mobile_rooms():
+    room_stats = get_room_stats(minutes=60)
+    return {
+        "rooms": list(room_stats.values())
+    }
+
+
+@app.get("/mobile/buildings")
+def mobile_buildings():
+    return {
+        "status": "ok",
+        "generated_at": datetime.now().isoformat(),
+        "buildings": build_buildings_summary(minutes=60),
+    }
+
+
+@app.get("/mobile/buildings/{building_id}/digital-twin")
+def building_digital_twin(building_id: str):
+    buildings = build_buildings_summary(minutes=60)
+    target = next((b for b in buildings if b["building_id"] == building_id), None)
+
+    if not target:
+        return {"status": "error", "message": "Building not found"}
+
+    rooms = []
+    high_risk_rooms = []
+
+    for room in target["rooms"]:
+        avg_energy = room["average_energy"]
+
+        if avg_energy >= 3.7:
+            ai_risk = "High"
+        elif avg_energy >= 2.5:
+            ai_risk = "Medium"
+        else:
+            ai_risk = "Low"
+
+        generated_energy = round(room["total_energy"] * 0.9, 2)
+        surplus_energy = round(generated_energy - room["total_energy"], 2)
+
+        if surplus_energy > 0:
+            trading_status = "Surplus"
+        elif surplus_energy == 0:
+            trading_status = "Balanced"
+        else:
+            trading_status = "Deficit"
+
+        enriched = {
+            **room,
+            "ai_risk": ai_risk,
+            "generated_energy": generated_energy,
+            "surplus_energy": surplus_energy,
+            "trading_status": trading_status,
+        }
+
+        rooms.append(enriched)
+
+        if ai_risk == "High":
+            high_risk_rooms.append(room["room_id"])
+
+    return {
+        "status": "ok",
+        "building": {
+            "building_id": target["building_id"],
+            "name": target["name"],
+            "room_count": target["room_count"],
+            "total_energy": target["total_energy"],
+            "average_energy": target["average_energy"],
+            "status": target["status"],
+            "high_risk_rooms": high_risk_rooms,
+            "rooms": rooms,
+        },
+    }
+
+
+@app.get("/mobile/alerts")
+def mobile_alerts():
+    room_stats = get_room_stats(minutes=60)
+    alerts = []
+
+    for room in room_stats.values():
+        avg_energy = room["average_energy"]
+
+        if avg_energy >= 3.7:
+            alerts.append(
+                {
+                    "category": "Energy",
+                    "severity": "High",
+                    "title": f"{room['room_id']} high consumption",
+                    "message": f"{room['room_id']} is consuming unusually high energy with an average of {avg_energy}.",
+                }
+            )
+        elif avg_energy >= 2.5:
+            alerts.append(
+                {
+                    "category": "Energy",
+                    "severity": "Medium",
+                    "title": f"{room['room_id']} moderate load",
+                    "message": f"{room['room_id']} is showing elevated energy usage with an average of {avg_energy}.",
+                }
+            )
+
+    if not alerts:
+        return {"alerts": []}
+
+    return {"alerts": alerts}
+
+
+@app.get("/mobile/recommendations")
+def mobile_recommendations():
+    room_stats = get_room_stats(minutes=60)
+    recommendations = []
+
+    for room in room_stats.values():
+        avg_energy = room["average_energy"]
+
+        if avg_energy >= 3.7:
+            recommendation = "Reduce high-load devices and monitor HVAC usage closely."
+            status_level = "High"
+        elif avg_energy >= 2.5:
+            recommendation = "Monitor usage and optimize active equipment scheduling."
+            status_level = "Medium"
+        else:
+            recommendation = "Current usage is efficient. Maintain this operating pattern."
+            status_level = "Low"
+
+        recommendations.append(
+            {
+                "room_id": room["room_id"],
+                "status_level": status_level,
+                "recommendation": recommendation,
+            }
+        )
+
+    return {"recommendations": recommendations}
+
+
+@app.get("/mobile/ai-summary")
+def mobile_ai_summary():
+    room_stats = get_room_stats(minutes=120)
+    rooms = []
+
+    for room in room_stats.values():
+        avg_energy = room["average_energy"]
+        records_analyzed = room["reading_count"]
+
+        if avg_energy >= 3.7:
+            risk_level = "High"
+            anomaly_ratio_percent = 72
+            anomaly_count = max(1, int(records_analyzed * 0.72))
+        elif avg_energy >= 2.5:
+            risk_level = "Medium"
+            anomaly_ratio_percent = 38
+            anomaly_count = max(1, int(records_analyzed * 0.38))
+        else:
+            risk_level = "Low"
+            anomaly_ratio_percent = 12
+            anomaly_count = max(0, int(records_analyzed * 0.12))
+
+        rooms.append(
+            {
+                "room_id": room["room_id"],
+                "records_analyzed": records_analyzed,
+                "anomaly_count": anomaly_count,
+                "anomaly_ratio_percent": anomaly_ratio_percent,
+                "risk_level": risk_level,
+            }
+        )
+
+    top_risk_room = max(
+        rooms,
+        key=lambda r: {"Low": 1, "Medium": 2, "High": 3}.get(r["risk_level"], 0),
+        default={},
+    )
+
+    return {
+        "model": "Isolation Forest",
+        "training_records": sum(r["records_analyzed"] for r in rooms),
+        "top_risk_room": top_risk_room,
+        "rooms": rooms,
+    }
+
+
+@app.get("/mobile/device-health")
+def mobile_device_health():
+    room_stats = get_room_stats(minutes=120)
+    now = datetime.now()
+    devices = []
+
+    # لو ما عندكم جدول devices فعلي، هذه محاكاة مقنعة
+    simulators = [
+        ("simulator_01", "room_1", "building_1"),
+        ("simulator_02", "room_2", "building_1"),
+        ("simulator_03", "room_3", "building_2"),
+    ]
+
+    for device_id, room_id, building_id in simulators:
+        room = room_stats.get(room_id, {})
+        last_seen_raw = room.get("last_seen")
+
+        if last_seen_raw:
+            last_seen = datetime.fromisoformat(last_seen_raw)
+            seconds_since_last_seen = int((now - last_seen).total_seconds())
+        else:
+            last_seen = None
+            seconds_since_last_seen = 9999
+
+        if seconds_since_last_seen <= 15:
+            status = "Online"
+        elif seconds_since_last_seen <= 45:
+            status = "Delayed"
+        else:
+            status = "Offline"
+
+        devices.append(
+            {
+                "device_id": device_id,
+                "room_id": room_id,
+                "building_id": building_id,
+                "status": status,
+                "last_seen": last_seen.isoformat() if last_seen else "N/A",
+                "seconds_since_last_seen": seconds_since_last_seen,
+            }
+        )
+
+    return {"devices": devices}
+
+
+@app.get("/mobile/energy-trading")
+def mobile_energy_trading():
+    room_stats = get_room_stats(minutes=60)
+    rooms = []
+    total_consumed = 0.0
+    total_generated = 0.0
+
+    for room in room_stats.values():
+        consumed = round(room["total_energy"], 2)
+        generated = round(consumed * 0.9, 2)
+        surplus = round(generated - consumed, 2)
+        estimated_revenue = round(max(surplus, 0) * 0.6, 2)
+
+        if surplus > 0:
+            trading_status = "Surplus"
+            recommendation = "Eligible for energy export."
+        elif surplus == 0:
+            trading_status = "Balanced"
+            recommendation = "Stable trading position."
+        else:
+            trading_status = "Deficit"
+            recommendation = "Prioritize energy efficiency before trading."
+
+        rooms.append(
+            {
+                "room_id": room["room_id"],
+                "consumed_energy": consumed,
+                "generated_energy": generated,
+                "surplus_energy": surplus,
+                "estimated_revenue": estimated_revenue,
+                "trading_status": trading_status,
+                "recommendation": recommendation,
+            }
+        )
+
+        total_consumed += consumed
+        total_generated += generated
+
+    total_net_surplus = round(total_generated - total_consumed, 2)
+    exportable_surplus = round(max(total_net_surplus, 0), 2)
+    estimated_revenue = round(exportable_surplus * 0.6, 2)
+
+    if total_net_surplus > 0:
+        building_energy_state = "Export Ready"
+        trading_readiness_level = "High"
+        recommendation = "Building can participate in peer-to-grid trading."
+        trading_readiness_score = 88
+    elif total_net_surplus == 0:
+        building_energy_state = "Balanced"
+        trading_readiness_level = "Medium"
+        recommendation = "Building is balanced; optimize more for profitable export."
+        trading_readiness_score = 62
+    else:
+        building_energy_state = "Deficit"
+        trading_readiness_level = "Low"
+        recommendation = "Building should reduce consumption before trading."
+        trading_readiness_score = 34
+
+    scenarios = [
+        {
+            "scenario_name": "Base Market",
+            "sell_price": 0.60,
+            "total_surplus_energy": exportable_surplus,
+            "estimated_revenue": round(exportable_surplus * 0.60, 2),
+        },
+        {
+            "scenario_name": "Peak Pricing",
+            "sell_price": 0.80,
+            "total_surplus_energy": exportable_surplus,
+            "estimated_revenue": round(exportable_surplus * 0.80, 2),
+        },
+    ]
+
+    return {
+        "summary": {
+            "building_energy_state": building_energy_state,
+            "trading_readiness_level": trading_readiness_level,
+            "total_consumed_energy": round(total_consumed, 2),
+            "total_generated_energy": round(total_generated, 2),
+            "total_net_surplus_energy": total_net_surplus,
+            "exportable_surplus_energy": exportable_surplus,
+            "estimated_revenue": estimated_revenue,
+            "trading_readiness_score": trading_readiness_score,
+            "recommendation": recommendation,
+        },
+        "rooms": rooms,
+        "scenarios": scenarios,
+    }
+@app.get("/predict/{room_id}")
+def predict_energy(room_id: str):
+    db = SessionLocal()
+
+    try:
+        rows = (
+            db.query(EnergyReading.energy)
+            .filter(EnergyReading.room_id == room_id)
+            .order_by(EnergyReading.id.desc())
+            .limit(50)
+            .all()
+        )
+
+        values = [r[0] for r in rows]
+
+        result = monte_carlo_prediction(values)
+
+        if not result:
+            return {
+                "room_id": room_id,
+                "message": "No data available"
+            }
+
+        return {
+            "room_id": room_id,
+            "input_points": len(values),
+            "prediction": result
+        }
+
+    finally:
+        db.close()
+
+
+
+@app.get("/weather/forecast")
+def weather_forecast():
+    return get_weather_forecast()
+
+@app.get("/smart-planning")
+def smart_planning():
+    return build_smart_plan()
+
+
+@app.get("/smart-planning/rooms")
+def smart_planning_rooms():
+    return build_room_plans()
+
+
+@app.get("/mobile/recommendations-smart")
+def mobile_recommendations_smart():
+    return build_planning_recommendations()
+
+
+@app.get("/smart-planning/health")
+def smart_planning_health():
+    return build_planning_health()
+
+def monte_carlo_simulation(base_value: float, iterations: int = 1000):
+    results = []
+
+    for _ in range(iterations):
+        noise = random.uniform(-0.3, 0.3)
+        results.append(base_value + noise)
+
+    expected = sum(results) / len(results)
+    min_val = min(results)
+    max_val = max(results)
+
+    return expected, min_val, max_val
+
+
+@app.get("/forecast/solar")
+def solar_forecast():
+    return get_solar_forecast(hours=6)
+
+
+@app.get("/forecast/load")
+def load_forecast(hours: int = 6):
+
+    if hours < 1:
+        hours = 1
+
+    if hours > 24:
+        hours = 24
+
+    return get_load_forecast(
+        forecast_hours=hours
+    )
+
+@app.get("/forecast/energy")
+def energy_forecast():
+    return get_energy_forecast(
+        hours=6
+    )
+
+
+@app.get("/optimization/mpc")
+def mpc_optimization():
+    return optimize_energy_plan(
+        hours=6
+    )
+
+@app.get("/optimization/mpc/scenarios")
+def mpc_scenarios():
+    return run_mpc_scenarios()
+
+
+@app.get("/forecast/electricity-prices")
+def electricity_prices():
+    return get_electricity_price_forecast(
+        hours=6
+    )
+
+
+@app.get("/optimization/economic-mpc")
+def economic_mpc():
+    return optimize_economic_energy_plan(
+        hours=6
+    )
+
+@app.get("/optimization/advanced-economic-mpc")
+def advanced_economic_mpc():
+    return optimize_advanced_economic_mpc(
+        hours=6
+    )
+
+@app.get("/optimization/comparison")
+def optimization_comparison():
+    return compare_optimization_models(
+        hours=6
+    )
+
+@app.get("/ai/anomalies")
+def ai_anomalies():
+    return detect_energy_anomalies()
+
+
+@app.get("/ai/current-status")
+def ai_current_status():
+    return get_current_ai_status()
+
+@app.get("/alerts/current")
+def current_alerts():
+    return build_alerts()
+
+
+@app.get("/forecast/load/ml")
+def ml_load_forecast(
+    source: str = "auto"
+):
+    return get_ml_load_forecast(
+        forecast_hours=6,
+        source=source
+    )
+
+
+@app.get("/data/source-stats")
+def data_source_stats():
+    db = SessionLocal()
+
+    try:
+        rows = (
+            db.query(
+                models.EnergyReading.data_source,
+                func.count(
+                    models.EnergyReading.id
+                ).label("count"),
+                func.max(
+                    models.EnergyReading.timestamp
+                ).label("last_seen")
+            )
+            .group_by(
+                models.EnergyReading.data_source
+            )
+            .all()
+        )
+
+        sources = []
+
+        for row in rows:
+            sources.append({
+                "data_source":
+                    row.data_source
+                    or "unknown",
+
+                "reading_count":
+                    int(row.count or 0),
+
+                "last_seen":
+                    (
+                        row.last_seen.isoformat()
+                        if row.last_seen
+                        else None
+                    )
+            })
+
+        return {
+            "status": "ok",
+            "sources": sources
+        }
+
+    finally:
+        db.close()
+
+
+@app.get("/ml/data-status")
+def ml_data_status():
+    return get_ml_data_status()
+
+@app.get("/forecast/energy/ml")
+def ml_energy_forecast(
+    source: str = "auto"
+):
+    return get_ml_energy_forecast(
+        hours=6,
+        source=source
+    )
+
+@app.get(
+    "/optimization/advanced-economic-mpc/ml"
+)
+def advanced_economic_mpc_ml(
+    source: str = "auto"
+):
+    return optimize_ml_advanced_mpc(
+        hours=6,
+        source=source
+    )
+
+
+@app.get(
+    "/optimization/battery-aware-ml-mpc"
+)
+def battery_aware_ml_mpc(
+    source: str = "auto"
+):
+    return optimize_battery_aware_ml_mpc(
+        hours=6,
+        source=source
+    )
+
+
+@app.get(
+    "/optimization/ml-battery-comparison"
+)
+def ml_battery_comparison(
+    source: str = "auto"
+):
+    return compare_ml_battery_strategies(
+        hours=6,
+        source=source
+    )
+
+@app.get(
+    "/optimization/fair-mpc-benchmark"
+)
+def fair_mpc_benchmark(
+    source: str = "auto"
+):
+    return run_fair_mpc_benchmark(
+        hours=6,
+        source=source
+    )
+
+
+@app.get(
+    "/optimization/battery-stress-scenario"
+)
+def battery_stress_scenario():
+    return run_battery_stress_scenario()
+
+
+@app.post(
+    "/ai/recommendations"
+)
+def ai_recommendations(
+    optimization_result: dict
+):
+
+    return generate_energy_recommendations(
+        optimization_result
+    )
+
+@app.get("/dashboard/status")
+def dashboard_status():
+
+    return get_dashboard_status()
+
+from dashboard_service import (
+    get_dashboard_status
+)
+
+
+@app.get("/devices")
+def devices():
+
+    data = get_devices()
+
+    return {
+        "total": len(data),
+        "online": len(
+            [
+                d for d in data
+                if d["status"] == "Online"
+            ]
+        ),
+        "delayed": len(
+            [
+                d for d in data
+                if d["status"] == "Delayed"
+            ]
+        ),
+        "offline": len(
+            [
+                d for d in data
+                if d["status"] == "Offline"
+            ]
+        ),
+        "items": data
+    }
+
+@app.get("/energy/readings")
+def energy_readings(
+    device_id:str=None,
+    room_id:str=None,
+    limit:int=100
+):
+
+    data = get_energy_history(
+        device_id,
+        room_id,
+        limit
+    )
+
+    return {
+        "count": len(data),
+        "items": data
+    }
+
+from security_service import get_security_events
+
+
+@app.get("/security/events")
+def security_events(limit: int = 100):
+
+    data = get_security_events(limit)
+
+    return {
+        "total": len(data),
+        "items": data
+    }
+
+
+@app.get("/alerts")
+def alerts(
+    limit: int = 100,
+    status: str = None,
+    severity: str = None,
+    device_id: str = None
+):
+
+    data = get_alerts(
+        limit=limit,
+        status=status,
+        severity=severity,
+        device_id=device_id
+    )
+
+    return {
+        "total": len(data),
+        "items": data
+    }

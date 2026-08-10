@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Smart Energy App</title>
+  <meta name="theme-color" content="#7C3AED" />
+  <link rel="manifest" href="/manifest.json" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-1: #0f0a19;
+      --bg-2: #171028;
+      --surface: #1b1430;
+      --card: #241a3b;
+      --card-2: #2b1f47;
+      --primary: #8b5cf6;
+      --primary-2: #a855f7;
+      --text: #f5f3ff;
+      --text-soft: #ddd6fe;
+      --muted: #a1a1b5;
+      --muted-2: #c4b5fd;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+      --radius-xl: 24px;
+      --radius-lg: 20px;
+      --radius-md: 16px;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(168, 85, 247, 0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(124, 58, 237, 0.16), transparent 24%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 100px;
+    }
+
+    .app {
+      max-width: 430px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding: 18px 16px 110px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 50px;
+      height: 50px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--primary-2), var(--primary));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .brand-text h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .brand-text p {
+      margin-top: 4px;
+      color: var(--muted-2);
+      font-size: 13px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(168, 85, 247, 0.08));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 26px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero-title {
+      font-size: 16px;
+      color: var(--muted-2);
+      margin-bottom: 8px;
+    }
+
+    .hero-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .hero-sub {
+      margin-top: 10px;
+      color: var(--text-soft);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .section {
+      display: none;
+      animation: fadeIn 0.22s ease;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .section-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 6px 0 14px;
+      color: #fff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .card,
+    .room-card,
+    .alert-card,
+    .rec-card,
+    .ai-card {
+      background: linear-gradient(180deg, var(--card), var(--card-2));
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .card.full {
+      grid-column: 1 / -1;
+    }
+
+    .card-label {
+      color: var(--muted-2);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .card-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .card-sub {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--text-soft);
+      line-height: 1.4;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .room-name,
+    .alert-title,
+    .rec-room,
+    .ai-room {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.3;
+    }
+
+    .metric {
+      margin-top: 10px;
+      color: var(--text-soft);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .metric strong {
+      color: #fff;
+    }
+
+    .muted {
+      color: var(--text-soft);
+      font-size: 14px;
+      margin-top: 12px;
+      line-height: 1.6;
+    }
+
+    .badge {
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: white;
+      white-space: nowrap;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+    }
+
+    .normal, .low { background: var(--success); }
+    .warning, .medium { background: var(--warning); }
+    .critical, .high { background: var(--danger); }
+
+    .loading {
+      margin-top: 22px;
+      text-align: center;
+      color: var(--text-soft);
+      font-size: 15px;
+      padding: 24px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 18px;
+    }
+
+    .bottom-nav {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 12px;
+      width: min(430px, calc(100% - 24px));
+      background: rgba(24, 16, 41, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(14px);
+      border-radius: 24px;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      padding: 10px 6px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+      z-index: 10;
+    }
+
+    .nav-btn {
+      background: transparent;
+      border: 0;
+      color: var(--muted-2);
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 4px;
+      cursor: pointer;
+      border-radius: 14px;
+      transition: 0.2s ease;
+    }
+
+    .nav-btn.active {
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: white;
+    }
+
+    .nav-icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .mini-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.06);
+      margin: 14px 0 4px;
+      border-radius: 999px;
+    }
+
+    .top-highlight {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      background: rgba(255,255,255,0.06);
+      padding: 8px 12px;
+      border-radius: 999px;
+      color: var(--text-soft);
+      font-size: 13px;
+    }
+
+    @media (max-width: 390px) {
+      .card-value {
+        font-size: 22px;
+      }
+      .room-name,
+      .alert-title,
+      .rec-room,
+      .ai-room {
+        font-size: 18px;
+      }
+      .hero-value {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>Smart Energy</h1>
+          <p>Secure monitoring mobile app</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero" id="heroBox">
+      <div class="hero-title">Live system overview</div>
+      <div class="hero-value">Loading...</div>
+      <div class="hero-sub">Secure smart energy monitoring for rooms, alerts, recommendations, and AI insights.</div>
+    </div>
+
+    <section id="home" class="section active">
+      <div class="section-title">Home Overview</div>
+      <div class="grid" id="homeGrid">
+        <div class="loading">Loading home data...</div>
+      </div>
+    </section>
+
+    <section id="rooms" class="section">
+      <div class="section-title">Rooms</div>
+      <div class="list" id="roomsList">
+        <div class="loading">Loading rooms...</div>
+      </div>
+    </section>
+
+    <section id="alerts" class="section">
+      <div class="section-title">Alerts</div>
+      <div class="list" id="alertsList">
+        <div class="loading">Loading alerts...</div>
+      </div>
+    </section>
+
+    <section id="recommendations" class="section">
+      <div class="section-title">Recommendations</div>
+      <div class="list" id="recommendationsList">
+        <div class="loading">Loading recommendations...</div>
+      </div>
+    </section>
+
+    <section id="ai" class="section">
+      <div class="section-title">AI Insights</div>
+      <div class="list" id="aiList">
+        <div class="loading">Loading AI insights...</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="bottom-nav">
+    <button class="nav-btn active" data-target="home"><span class="nav-icon">⌂</span><span>Home</span></button>
+    <button class="nav-btn" data-target="rooms"><span class="nav-icon">▣</span><span>Rooms</span></button>
+    <button class="nav-btn" data-target="alerts"><span class="nav-icon">⚠</span><span>Alerts</span></button>
+    <button class="nav-btn" data-target="recommendations"><span class="nav-icon">✦</span><span>Recs</span></button>
+    <button class="nav-btn" data-target="ai"><span class="nav-icon">◉</span><span>AI</span></button>
+  </div>
+
+  <script>
+    const sections = document.querySelectorAll('.section');
+    const navButtons = document.querySelectorAll('.nav-btn');
+
+    navButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        navButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const target = btn.dataset.target;
+        sections.forEach(section => {
+          section.classList.toggle('active', section.id === target);
+        });
+      });
+    });
+
+    function levelClass(value) {
+      const v = String(value || '').toLowerCase();
+      if (v.includes('critical') || v.includes('high')) return 'critical';
+      if (v.includes('warning') || v.includes('medium')) return 'warning';
+      return 'normal';
+    }
+
+async function loadHome() {
+  const [homeRes, healthRes] = await Promise.all([
+    fetch('/mobile/home'),
+    fetch('/mobile/device-health')
+  ]);
+
+  const homeData = await homeRes.json();
+  const healthData = await healthRes.json();
+
+  if (homeData.status !== 'ok') {
+    document.getElementById('homeGrid').innerHTML = '<div class="loading">No home data available.</div>';
+    return;
+  }
+
+  const s = homeData.summary;
+  const device = healthData.devices && healthData.devices.length ? healthData.devices[0] : null;
+
+  const healthStatus = device ? device.status : 'Unknown';
+  const healthSeconds = device && device.seconds_since_last_seen !== null
+    ? device.seconds_since_last_seen
+    : 'N/A';
+
+  let healthClass = 'normal';
+  if (healthStatus === 'Delayed') healthClass = 'warning';
+  if (healthStatus === 'Offline') healthClass = 'critical';
+
+  document.getElementById('heroBox').innerHTML = `
+    <div class="hero-title">Live system overview</div>
+    <div class="hero-value">${s.top_consumer.room_id}</div>
+    <div class="hero-sub">Current top consumer with average energy of ${s.top_consumer.average_energy}. System status is ${homeData.system_status}.</div>
+    <div class="top-highlight">⚡ Total cost: ${s.total_cost} &nbsp; • &nbsp; Alerts: ${s.total_alerts}</div>
+  `;
+
+  document.getElementById('homeGrid').innerHTML = `
+    <div class="card">
+      <div class="card-label">System Status</div>
+      <div class="card-value">${homeData.system_status}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Cost</div>
+      <div class="card-value">${s.total_cost}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Alerts</div>
+      <div class="card-value">${s.total_alerts}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Top Consumer</div>
+      <div class="card-value">${s.top_consumer.room_id}</div>
+      <div class="card-sub">Average: ${s.top_consumer.average_energy}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Medium Risk</div>
+      <div class="card-value">${s.medium_risk_count}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">High Risk</div>
+      <div class="card-value">${s.high_risk_count}</div>
+    </div>
+    <div class="card full">
+      <div class="row">
+        <div>
+          <div class="card-label">Device Health</div>
+          <div class="card-value" style="font-size:22px;">${device ? device.device_id : 'N/A'}</div>
+        </div>
+        <div class="badge ${healthClass}">${healthStatus}</div>
+      </div>
+      <div class="card-sub">Seconds since last seen: ${healthSeconds}</div>
+    </div>
+  `;
+}
+
+    async function loadRooms() {
+      const res = await fetch('/mobile/rooms');
+      const data = await res.json();
+
+      if (data.status !== 'ok') {
+        document.getElementById('roomsList').innerHTML = '<div class="loading">No room data available.</div>';
+        return;
+      }
+
+      document.getElementById('roomsList').innerHTML = data.rooms.map(room => `
+        <div class="room-card">
+          <div class="row">
+            <div class="room-name">${room.room_id}</div>
+            <div class="badge ${levelClass(room.status_level)}">${room.status_level}</div>
+          </div>
+          <div class="mini-divider"></div>
+          <div class="metric"><strong>Average Energy:</strong> ${room.average_energy}</div>
+          <div class="metric"><strong>Estimated Cost:</strong> ${room.estimated_cost}</div>
+          <div class="metric"><strong>Utilization:</strong> ${room.utilization_percent}%</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadAlerts() {
+      const res = await fetch('/mobile/alerts');
+      const data = await res.json();
+
+      if (data.status !== 'ok') {
+        document.getElementById('alertsList').innerHTML = '<div class="loading">No alerts available.</div>';
+        return;
+      }
+
+      if (!data.alerts.length) {
+        document.getElementById('alertsList').innerHTML = '<div class="loading">No active alerts.</div>';
+        return;
+      }
+
+      document.getElementById('alertsList').innerHTML = data.alerts.map(alert => `
+        <div class="alert-card">
+          <div class="row">
+            <div class="alert-title">${alert.title}</div>
+            <div class="badge ${levelClass(alert.severity)}">${alert.severity}</div>
+          </div>
+          <div class="metric"><strong>Category:</strong> ${alert.category}</div>
+          <div class="muted">${alert.message}</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadRecommendations() {
+      const res = await fetch('/mobile/recommendations');
+      const data = await res.json();
+
+      if (data.status !== 'ok') {
+        document.getElementById('recommendationsList').innerHTML = '<div class="loading">No recommendations available.</div>';
+        return;
+      }
+
+      document.getElementById('recommendationsList').innerHTML = data.recommendations.map(item => `
+        <div class="rec-card">
+          <div class="row">
+            <div class="rec-room">${item.room_id}</div>
+            <div class="badge ${levelClass(item.status_level)}">${item.status_level}</div>
+          </div>
+          <div class="muted">${item.recommendation}</div>
+        </div>
+      `).join('');
+    }
+
+    async function loadAI() {
+      const res = await fetch('/mobile/ai-summary');
+      const data = await res.json();
+
+      if (data.status !== 'ok') {
+        document.getElementById('aiList').innerHTML = '<div class="loading">No AI data available.</div>';
+        return;
+      }
+
+      const top = data.top_risk_room;
+
+      document.getElementById('aiList').innerHTML = `
+        <div class="ai-card">
+          <div class="row">
+            <div class="ai-room">AI Model</div>
+            <div class="badge normal">${data.model}</div>
+          </div>
+          <div class="mini-divider"></div>
+          <div class="metric"><strong>Training Records:</strong> ${data.training_records}</div>
+          <div class="metric"><strong>Top Risk Room:</strong> ${top ? top.room_id : 'N/A'}</div>
+          <div class="metric"><strong>Top Risk Level:</strong> ${top ? top.risk_level : 'N/A'}</div>
+        </div>
+        ${data.rooms.map(room => `
+          <div class="ai-card">
+            <div class="row">
+              <div class="ai-room">${room.room_id}</div>
+              <div class="badge ${levelClass(room.risk_level)}">${room.risk_level}</div>
+            </div>
+            <div class="mini-divider"></div>
+            <div class="metric"><strong>Records Analyzed:</strong> ${room.records_analyzed}</div>
+            <div class="metric"><strong>Anomaly Count:</strong> ${room.anomaly_count}</div>
+            <div class="metric"><strong>Anomaly Ratio:</strong> ${room.anomaly_ratio_percent}%</div>
+            <div class="metric"><strong>Average AI Score:</strong> ${room.average_ai_score}</div>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    async function loadAll() {
+      await Promise.all([
+        loadHome(),
+        loadRooms(),
+        loadAlerts(),
+        loadRecommendations(),
+        loadAI()
+      ]);
+    }
+
+    loadAll();
+    setInterval(loadAll, 8000);
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js');
+      });
+    }
+  </script>
+</body>
+</html>

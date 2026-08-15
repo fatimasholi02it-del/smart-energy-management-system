@@ -1,9 +1,53 @@
 from weather_service import get_weather_forecast
+from solar_service import estimate_solar_power
 from database import SessionLocal
 import models
 from sqlalchemy import func
 from datetime import datetime, timedelta
 
+
+def get_planning_weather():
+    weather_response = get_weather_forecast(forecast_hours=6)
+
+    if (
+        weather_response.get("status") != "ok"
+        or not weather_response.get("hours")
+    ):
+        return {
+            "forecast_time": None,
+            "weather_condition": "Unknown",
+            "cloud_percent": 0.0,
+            "temperature": 0.0,
+            "estimated_solar_generation": 0.0,
+        }
+
+    hours = weather_response.get("hours", [])
+    first_hour = hours[0]
+
+    estimated_solar_generation = round(
+        sum(
+            estimate_solar_power(
+                float(hour.get("shortwave_radiation_wm2") or 0)
+            )
+            for hour in hours
+        ),
+        2,
+    )
+
+    return {
+        "forecast_time": first_hour.get("forecast_time"),
+        "weather_condition": first_hour.get(
+            "weather_condition",
+            "Unknown",
+        ),
+        "cloud_percent": float(
+            first_hour.get("cloud_percent") or 0
+        ),
+        "temperature": float(
+            first_hour.get("temperature") or 0
+        ),
+        "estimated_solar_generation": estimated_solar_generation,
+    }
 
 def get_current_consumption(minutes: int = 1440):
     db = SessionLocal()
@@ -252,7 +296,7 @@ def evaluate_room_plan(room_id: str, avg_energy: float, weather: dict, battery: 
 
 
 def build_room_plans():
-    weather = get_weather_forecast()
+    weather = get_planning_weather()
     current_consumption = get_current_consumption()
     battery = get_battery_state(current_consumption)
     room_consumptions = get_room_consumptions()
@@ -293,7 +337,7 @@ def build_room_plans():
 
 
 def build_smart_plan():
-    weather = get_weather_forecast()
+    weather = get_planning_weather()
     current_consumption = get_current_consumption()
     top_consumer = get_top_consumer()
     battery = get_battery_state(current_consumption)

@@ -21,6 +21,7 @@ from device_service import get_devices
 from energy_service import get_energy_history
 from security_service import get_security_events
 from alert_engine import generate_alerts
+from live_power_service import get_live_power_summary
 
 from dashboard_service import (
     get_dashboard_status
@@ -425,6 +426,14 @@ def mobile_home():
             },
         },
     }
+
+
+
+
+@app.get("/mobile/live-power")
+def mobile_live_power():
+    return get_live_power_summary() 
+
 
 
 @app.get("/mobile/rooms")
@@ -1138,3 +1147,6 @@ for route in app.routes:
     )
 
 print("===================================================\n")
+
+
+

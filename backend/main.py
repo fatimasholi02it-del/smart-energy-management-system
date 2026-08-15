@@ -78,13 +78,47 @@ from database import SessionLocal, engine
 from monte_carlo_service import monte_carlo_prediction
 from models import EnergyReading
 
+from contextlib import asynccontextmanager
+from mqtt_consumer import start_mqtt_consumer
+
 import random
 
 
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Smart Energy API")
 
+mqtt_client = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global mqtt_client
+
+    try:
+        print("Starting MQTT consumer...")
+
+        mqtt_client = start_mqtt_consumer()
+
+        print("MQTT consumer started")
+
+    except Exception as e:
+        mqtt_client = None
+        print(f"MQTT consumer startup failed: {e}")
+
+    yield
+
+    if mqtt_client is not None:
+        try:
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+            print("MQTT consumer stopped")
+        except Exception as e:
+            print(f"MQTT consumer shutdown warning: {e}")
+            
+app = FastAPI(
+    title="Smart Energy API",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,

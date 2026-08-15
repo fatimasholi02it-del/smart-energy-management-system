@@ -1081,3 +1081,13 @@ def alerts(
         "total": len(data),
         "items": data
     }
+
+print("\n================ REGISTERED ROUTES ================")
+
+for route in app.routes:
+    print(
+        getattr(route, "path", "NO_PATH"),
+        getattr(route, "methods", "")
+    )
+
+print("===================================================\n")

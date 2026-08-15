@@ -20,6 +20,7 @@ from alert_service import get_alerts
 from device_service import get_devices
 from energy_service import get_energy_history
 from security_service import get_security_events
+from alert_engine import generate_alerts
 
 from dashboard_service import (
     get_dashboard_status
@@ -886,7 +887,19 @@ def ai_current_status():
 
 @app.get("/alerts/current")
 def current_alerts():
-    return build_alerts()
+
+    ai_monitoring = (
+        get_current_ai_status()
+    )
+
+    devices = (
+        get_devices()
+    )
+
+    return generate_alerts(
+        ai_monitoring,
+        devices
+    )
 
 
 @app.get("/forecast/load/ml")

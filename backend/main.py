@@ -1025,36 +1025,97 @@ def building_digital_twin(
 
 @app.get("/mobile/alerts")
 def mobile_alerts():
-    room_stats = get_room_stats(minutes=60)
+    room_stats = get_room_stats(
+        minutes=60
+    )
+
     alerts = []
 
     for room in room_stats.values():
-        avg_energy = room["average_energy"]
+        average_power_kw = float(
+            room.get(
+                "average_power_kw",
+                room.get(
+                    "average_energy",
+                    0,
+                ),
+            )
+            or 0
+        )
 
-        if avg_energy >= 3.7:
+        room_id = room["room_id"]
+
+        if average_power_kw >= 3.7:
             alerts.append(
                 {
-                    "category": "Energy",
-                    "severity": "High",
-                    "title": f"{room['room_id']} high consumption",
-                    "message": f"{room['room_id']} is consuming unusually high energy with an average of {avg_energy}.",
+                    "room_id":
+                        room_id,
+
+                    "category":
+                        "Energy",
+
+                    "severity":
+                        "High",
+
+                    "title":
+                        f"{room_id} high power load",
+
+                    "message":
+                        (
+                            f"{room_id} is operating at a high "
+                            f"power load with an average power "
+                            f"of {average_power_kw:.2f} kW "
+                            f"during the last 60 minutes."
+                        ),
+
+                    "average_power_kw":
+                        round(
+                            average_power_kw,
+                            2,
+                        ),
+
+                    "window_minutes":
+                        60,
                 }
             )
-        elif avg_energy >= 2.5:
+
+        elif average_power_kw >= 2.5:
             alerts.append(
                 {
-                    "category": "Energy",
-                    "severity": "Medium",
-                    "title": f"{room['room_id']} moderate load",
-                    "message": f"{room['room_id']} is showing elevated energy usage with an average of {avg_energy}.",
+                    "room_id":
+                        room_id,
+
+                    "category":
+                        "Energy",
+
+                    "severity":
+                        "Medium",
+
+                    "title":
+                        f"{room_id} moderate power load",
+
+                    "message":
+                        (
+                            f"{room_id} is showing an elevated "
+                            f"power load with an average power "
+                            f"of {average_power_kw:.2f} kW "
+                            f"during the last 60 minutes."
+                        ),
+
+                    "average_power_kw":
+                        round(
+                            average_power_kw,
+                            2,
+                        ),
+
+                    "window_minutes":
+                        60,
                 }
             )
 
-    if not alerts:
-        return {"alerts": []}
-
-    return {"alerts": alerts}
-
+    return {
+        "alerts": alerts,
+    }
 
 @app.get("/mobile/recommendations")
 def mobile_recommendations():

@@ -22,6 +22,7 @@ from energy_service import get_energy_history
 from security_service import get_security_events
 from alert_engine import generate_alerts
 from live_power_service import get_live_power_summary
+from energy_trading_service import build_energy_trading
 
 from dashboard_service import (
     get_dashboard_status
@@ -1239,93 +1240,9 @@ def mobile_device_health():
 
 @app.get("/mobile/energy-trading")
 def mobile_energy_trading():
-    room_stats = get_room_stats(minutes=60)
-    rooms = []
-    total_consumed = 0.0
-    total_generated = 0.0
+    return build_energy_trading()
 
-    for room in room_stats.values():
-        consumed = round(room["total_energy"], 2)
-        generated = round(consumed * 0.9, 2)
-        surplus = round(generated - consumed, 2)
-        estimated_revenue = round(max(surplus, 0) * 0.6, 2)
 
-        if surplus > 0:
-            trading_status = "Surplus"
-            recommendation = "Eligible for energy export."
-        elif surplus == 0:
-            trading_status = "Balanced"
-            recommendation = "Stable trading position."
-        else:
-            trading_status = "Deficit"
-            recommendation = "Prioritize energy efficiency before trading."
-
-        rooms.append(
-            {
-                "room_id": room["room_id"],
-                "consumed_energy": consumed,
-                "generated_energy": generated,
-                "surplus_energy": surplus,
-                "estimated_revenue": estimated_revenue,
-                "trading_status": trading_status,
-                "recommendation": recommendation,
-            }
-        )
-
-        total_consumed += consumed
-        total_generated += generated
-
-    total_net_surplus = round(total_generated - total_consumed, 2)
-    exportable_surplus = round(max(total_net_surplus, 0), 2)
-    estimated_revenue = round(exportable_surplus * 0.6, 2)
-
-    if total_net_surplus > 0:
-        building_energy_state = "Export Ready"
-        trading_readiness_level = "High"
-        recommendation = "Building can participate in peer-to-grid trading."
-        trading_readiness_score = 88
-    elif total_net_surplus == 0:
-        building_energy_state = "Balanced"
-        trading_readiness_level = "Medium"
-        recommendation = "Building is balanced; optimize more for profitable export."
-        trading_readiness_score = 62
-    else:
-        building_energy_state = "Deficit"
-        trading_readiness_level = "Low"
-        recommendation = "Building should reduce consumption before trading."
-        trading_readiness_score = 34
-
-    scenarios = [
-        {
-            "scenario_name": "Base Market",
-            "sell_price": 0.60,
-            "total_surplus_energy": exportable_surplus,
-            "estimated_revenue": round(exportable_surplus * 0.60, 2),
-        },
-        {
-            "scenario_name": "Peak Pricing",
-            "sell_price": 0.80,
-            "total_surplus_energy": exportable_surplus,
-            "estimated_revenue": round(exportable_surplus * 0.80, 2),
-        },
-    ]
-
-    return {
-        "summary": {
-            "building_energy_state": building_energy_state,
-            "trading_readiness_level": trading_readiness_level,
-            "total_consumed_energy": round(total_consumed, 2),
-            "total_generated_energy": round(total_generated, 2),
-            "total_net_surplus_energy": total_net_surplus,
-            "exportable_surplus_energy": exportable_surplus,
-            "estimated_revenue": estimated_revenue,
-            "trading_readiness_score": trading_readiness_score,
-            "recommendation": recommendation,
-        },
-        "rooms": rooms,
-        "scenarios": scenarios,
-    }
-@app.get("/predict/{room_id}")
 def predict_energy(room_id: str):
     db = SessionLocal()
 

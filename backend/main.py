@@ -293,71 +293,315 @@ def get_recent_readings(minutes: int = 60):
 
 def get_room_stats(minutes: int = 60):
     db = SessionLocal()
+
     try:
-        since_time = datetime.now() - timedelta(minutes=minutes)
+        since_time = (
+            datetime.now()
+            - timedelta(minutes=minutes)
+        )
 
         rows = (
-            db.query(
-                models.EnergyReading.room_id,
-                func.avg(models.EnergyReading.energy).label("avg_energy"),
-                func.count(models.EnergyReading.id).label("reading_count"),
-                func.max(models.EnergyReading.timestamp).label("last_seen"),
+            db.query(models.EnergyReading)
+            .filter(
+                models.EnergyReading.timestamp
+                >= since_time
             )
-            .filter(models.EnergyReading.timestamp >= since_time)
-            .group_by(models.EnergyReading.room_id)
+            .order_by(
+                models.EnergyReading.room_id.asc(),
+                models.EnergyReading.timestamp.asc(),
+                models.EnergyReading.id.asc(),
+            )
             .all()
         )
 
-        room_stats = {}
-        for row in rows:
-            avg_energy = round(float(row.avg_energy or 0), 2)
-            reading_count = int(row.reading_count or 0)
-            total_energy = round(avg_energy * reading_count, 2)
+        readings_by_room = {}
 
-            if avg_energy >= 3.5:
+        for row in rows:
+            readings_by_room.setdefault(
+                row.room_id,
+                [],
+            ).append(row)
+
+        room_stats = {}
+
+        tariff_per_kwh = 0.45
+
+        # إذا صار انقطاع طويل،
+        # ما نحسب الفترة كلها كأن الجهاز كان شغال.
+        max_gap_seconds = 30
+
+        for room_id, room_readings in (
+            readings_by_room.items()
+        ):
+            power_values = []
+
+            for reading in room_readings:
+                power_kw = (
+                    reading.power_kw
+                    if reading.power_kw is not None
+                    else reading.energy
+                )
+
+                power_values.append(
+                    float(power_kw or 0)
+                )
+
+            reading_count = len(
+                room_readings
+            )
+
+            average_power_kw = (
+                sum(power_values)
+                / reading_count
+                if reading_count
+                else 0
+            )
+
+            # =========================================
+            # TRUE ENERGY CALCULATION
+            #
+            # kWh = kW × hours
+            # Using trapezoidal integration
+            # between consecutive readings.
+            # =========================================
+
+            total_energy_kwh = 0.0
+
+            for index in range(
+                1,
+                reading_count,
+            ):
+                previous = (
+                    room_readings[
+                        index - 1
+                    ]
+                )
+
+                current = (
+                    room_readings[
+                        index
+                    ]
+                )
+
+                previous_time = (
+                    previous.timestamp
+                )
+
+                current_time = (
+                    current.timestamp
+                )
+
+                if (
+                    previous_time is None
+                    or current_time is None
+                ):
+                    continue
+
+                delta_seconds = (
+                    current_time
+                    - previous_time
+                ).total_seconds()
+
+                if delta_seconds <= 0:
+                    continue
+
+                # Don't integrate across
+                # long communication gaps.
+                if (
+                    delta_seconds
+                    > max_gap_seconds
+                ):
+                    continue
+
+                previous_power = (
+                    previous.power_kw
+                    if previous.power_kw
+                    is not None
+                    else previous.energy
+                )
+
+                current_power = (
+                    current.power_kw
+                    if current.power_kw
+                    is not None
+                    else current.energy
+                )
+
+                previous_power = float(
+                    previous_power or 0
+                )
+
+                current_power = float(
+                    current_power or 0
+                )
+
+                average_interval_power = (
+                    previous_power
+                    + current_power
+                ) / 2.0
+
+                delta_hours = (
+                    delta_seconds
+                    / 3600.0
+                )
+
+                total_energy_kwh += (
+                    average_interval_power
+                    * delta_hours
+                )
+
+            average_power_kw = round(
+                average_power_kw,
+                2,
+            )
+
+            total_energy_kwh = round(
+                total_energy_kwh,
+                3,
+            )
+
+            if average_power_kw >= 3.5:
                 status_level = "High"
-            elif avg_energy >= 2.3:
+
+            elif average_power_kw >= 2.3:
                 status_level = "Medium"
+
             else:
                 status_level = "Low"
 
-            estimated_cost = round(total_energy * 0.45, 2)
-            utilization_percent = min(100, round((avg_energy / 5.0) * 100, 2))
+            estimated_cost = round(
+                total_energy_kwh
+                * tariff_per_kwh,
+                2,
+            )
 
-            room_stats[row.room_id] = {
-                "room_id": row.room_id,
-                "average_energy": avg_energy,
-                "reading_count": reading_count,
-                "total_energy": total_energy,
-                "last_seen": row.last_seen.isoformat() if row.last_seen else None,
-                "status_level": status_level,
-                "estimated_cost": estimated_cost,
-                "utilization_percent": utilization_percent,
+            utilization_percent = min(
+                100,
+                round(
+                    (
+                        average_power_kw
+                        / 5.0
+                    )
+                    * 100,
+                    2,
+                ),
+            )
+
+            last_seen = (
+                room_readings[-1].timestamp
+                if room_readings
+                else None
+            )
+
+            room_stats[
+                room_id
+            ] = {
+                "room_id":
+                    room_id,
+
+                # Compatibility with
+                # existing Flutter / AI code.
+                "average_energy":
+                    average_power_kw,
+
+                # Correct semantic field.
+                "average_power_kw":
+                    average_power_kw,
+
+                "reading_count":
+                    reading_count,
+
+                # Keep existing key so
+                # current Flutter screens work.
+                "total_energy":
+                    total_energy_kwh,
+
+                "total_energy_kwh":
+                    total_energy_kwh,
+
+                "last_seen":
+                    (
+                        last_seen.isoformat()
+                        if last_seen
+                        else None
+                    ),
+
+                "status_level":
+                    status_level,
+
+                "estimated_cost":
+                    estimated_cost,
+
+                "utilization_percent":
+                    utilization_percent,
+
+                "window_minutes":
+                    minutes,
+
+                "tariff_per_kwh":
+                    tariff_per_kwh,
             }
 
+        # =============================================
         # Fill missing rooms
+        # =============================================
+
         all_rooms = sorted(
-            {room for b in BUILDING_ROOM_MAP.values() for room in b["rooms"]}
+            {
+                room
+                for building
+                in BUILDING_ROOM_MAP.values()
+                for room
+                in building["rooms"]
+            }
         )
+
         for room_id in all_rooms:
             room_stats.setdefault(
                 room_id,
                 {
-                    "room_id": room_id,
-                    "average_energy": 0.0,
-                    "reading_count": 0,
-                    "total_energy": 0.0,
-                    "last_seen": None,
-                    "status_level": "No Data",
-                    "estimated_cost": 0.0,
-                    "utilization_percent": 0.0,
+                    "room_id":
+                        room_id,
+
+                    "average_energy":
+                        0.0,
+
+                    "average_power_kw":
+                        0.0,
+
+                    "reading_count":
+                        0,
+
+                    "total_energy":
+                        0.0,
+
+                    "total_energy_kwh":
+                        0.0,
+
+                    "last_seen":
+                        None,
+
+                    "status_level":
+                        "No Data",
+
+                    "estimated_cost":
+                        0.0,
+
+                    "utilization_percent":
+                        0.0,
+
+                    "window_minutes":
+                        minutes,
+
+                    "tariff_per_kwh":
+                        tariff_per_kwh,
                 },
             )
 
         return room_stats
+
     finally:
         db.close()
-
 
 def build_buildings_summary(minutes: int = 60):
     room_stats = get_room_stats(minutes)
@@ -454,63 +698,330 @@ def mobile_buildings():
 
 
 @app.get("/mobile/buildings/{building_id}/digital-twin")
-def building_digital_twin(building_id: str):
-    buildings = build_buildings_summary(minutes=60)
-    target = next((b for b in buildings if b["building_id"] == building_id), None)
+def building_digital_twin(
+    building_id: str
+):
+    buildings = build_buildings_summary(
+        minutes=60
+    )
+
+    target = next(
+        (
+            building
+            for building in buildings
+            if building["building_id"]
+            == building_id
+        ),
+        None,
+    )
 
     if not target:
-        return {"status": "error", "message": "Building not found"}
+        return {
+            "status": "error",
+            "message": "Building not found",
+        }
+
+    # =============================================
+    # Solar forecast for the NEXT 1 HOUR
+    # =============================================
+
+    solar_forecast = get_solar_forecast(
+        hours=1
+    )
+
+    solar_available = (
+        solar_forecast.get("status")
+        == "ok"
+        and bool(
+            solar_forecast.get("hours")
+        )
+    )
+
+    system_solar_power_kw = 0.0
+    solar_forecast_time = None
+
+    if solar_available:
+        first_hour = (
+            solar_forecast["hours"][0]
+        )
+
+        system_solar_power_kw = float(
+            first_hour.get(
+                "estimated_solar_power_kw",
+                0,
+            )
+            or 0
+        )
+
+        solar_forecast_time = (
+            first_hour.get(
+                "forecast_time"
+            )
+        )
+
+    # =============================================
+    # Divide system solar capacity between rooms
+    #
+    # Current system:
+    # building_1 -> room_1, room_2
+    # building_2 -> room_3
+    #
+    # Therefore every room receives an equal
+    # share of the total system solar generation.
+    # =============================================
+
+    total_system_rooms = sum(
+        len(info["rooms"])
+        for info
+        in BUILDING_ROOM_MAP.values()
+    )
+
+    room_solar_power_kw = (
+        system_solar_power_kw
+        / total_system_rooms
+        if total_system_rooms
+        else 0
+    )
+
+    # Projection horizon
+    projection_hours = 1.0
 
     rooms = []
     high_risk_rooms = []
 
-    for room in target["rooms"]:
-        avg_energy = room["average_energy"]
+    building_projected_consumption = 0.0
+    building_projected_solar = 0.0
 
-        if avg_energy >= 3.7:
+    for room in target["rooms"]:
+        average_power_kw = float(
+            room.get(
+                "average_power_kw",
+                room.get(
+                    "average_energy",
+                    0,
+                ),
+            )
+            or 0
+        )
+
+        # =========================================
+        # AI Risk
+        # =========================================
+
+        if average_power_kw >= 3.7:
             ai_risk = "High"
-        elif avg_energy >= 2.5:
+
+        elif average_power_kw >= 2.5:
             ai_risk = "Medium"
+
         else:
             ai_risk = "Low"
 
-        generated_energy = round(room["total_energy"] * 0.9, 2)
-        surplus_energy = round(generated_energy - room["total_energy"], 2)
+        # =========================================
+        # Projected consumption for next hour
+        #
+        # kWh = average kW × hours
+        # =========================================
 
-        if surplus_energy > 0:
+        projected_consumption_kwh = round(
+            average_power_kw
+            * projection_hours,
+            3,
+        )
+
+        # =========================================
+        # Projected solar energy for next hour
+        # =========================================
+
+        projected_solar_kwh = round(
+            room_solar_power_kw
+            * projection_hours,
+            3,
+        )
+
+        # =========================================
+        # Net energy balance
+        #
+        # positive  -> surplus
+        # negative  -> deficit
+        # near zero -> balanced
+        # =========================================
+
+        net_energy_kwh = round(
+            projected_solar_kwh
+            - projected_consumption_kwh,
+            3,
+        )
+
+        balance_tolerance_kwh = 0.05
+
+        if (
+            net_energy_kwh
+            > balance_tolerance_kwh
+        ):
             trading_status = "Surplus"
-        elif surplus_energy == 0:
-            trading_status = "Balanced"
-        else:
+
+        elif (
+            net_energy_kwh
+            < -balance_tolerance_kwh
+        ):
             trading_status = "Deficit"
+
+        else:
+            trading_status = "Balanced"
+
+        building_projected_consumption += (
+            projected_consumption_kwh
+        )
+
+        building_projected_solar += (
+            projected_solar_kwh
+        )
 
         enriched = {
             **room,
-            "ai_risk": ai_risk,
-            "generated_energy": generated_energy,
-            "surplus_energy": surplus_energy,
-            "trading_status": trading_status,
+
+            "ai_risk":
+                ai_risk,
+
+            # -------------------------------------
+            # Compatibility keys used by Flutter
+            # -------------------------------------
+
+            "generated_energy":
+                projected_solar_kwh,
+
+            "surplus_energy":
+                net_energy_kwh,
+
+            "trading_status":
+                trading_status,
+
+            # -------------------------------------
+            # Clear semantic fields
+            # -------------------------------------
+
+            "projection_hours":
+                projection_hours,
+
+            "projected_consumption_kwh":
+                projected_consumption_kwh,
+
+            "projected_solar_energy_kwh":
+                projected_solar_kwh,
+
+            "projected_net_energy_kwh":
+                net_energy_kwh,
+
+            "solar_forecast_time":
+                solar_forecast_time,
+
+            "solar_forecast_available":
+                solar_available,
         }
 
-        rooms.append(enriched)
+        rooms.append(
+            enriched
+        )
 
         if ai_risk == "High":
-            high_risk_rooms.append(room["room_id"])
+            high_risk_rooms.append(
+                room["room_id"]
+            )
+
+    # =============================================
+    # Building-level projected balance
+    # =============================================
+
+    building_projected_consumption = round(
+        building_projected_consumption,
+        3,
+    )
+
+    building_projected_solar = round(
+        building_projected_solar,
+        3,
+    )
+
+    building_net_energy = round(
+        building_projected_solar
+        - building_projected_consumption,
+        3,
+    )
+
+    if building_net_energy > 0.05:
+        building_trading_status = (
+            "Surplus"
+        )
+
+    elif building_net_energy < -0.05:
+        building_trading_status = (
+            "Deficit"
+        )
+
+    else:
+        building_trading_status = (
+            "Balanced"
+        )
 
     return {
         "status": "ok",
+
+        "projection": {
+            "hours":
+                projection_hours,
+
+            "solar_forecast_available":
+                solar_available,
+
+            "solar_forecast_time":
+                solar_forecast_time,
+
+            "system_solar_power_kw":
+                round(
+                    system_solar_power_kw,
+                    3,
+                ),
+
+            "projected_consumption_kwh":
+                building_projected_consumption,
+
+            "projected_solar_energy_kwh":
+                building_projected_solar,
+
+            "projected_net_energy_kwh":
+                building_net_energy,
+
+            "trading_status":
+                building_trading_status,
+        },
+
         "building": {
-            "building_id": target["building_id"],
-            "name": target["name"],
-            "room_count": target["room_count"],
-            "total_energy": target["total_energy"],
-            "average_energy": target["average_energy"],
-            "status": target["status"],
-            "high_risk_rooms": high_risk_rooms,
-            "rooms": rooms,
+            "building_id":
+                target["building_id"],
+
+            "name":
+                target["name"],
+
+            "room_count":
+                target["room_count"],
+
+            "total_energy":
+                target["total_energy"],
+
+            "average_energy":
+                target["average_energy"],
+
+            "status":
+                target["status"],
+
+            "high_risk_rooms":
+                high_risk_rooms,
+
+            "rooms":
+                rooms,
         },
     }
-
 
 @app.get("/mobile/alerts")
 def mobile_alerts():

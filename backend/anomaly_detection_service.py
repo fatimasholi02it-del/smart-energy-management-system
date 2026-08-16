@@ -34,40 +34,31 @@ def get_effective_power(row):
     return None
 
 
-def determine_analysis_scope(latest_row):
+def determine_analysis_scope(
+    latest_row
+):
     """
-    Real sensor:
-        train using the same physical device only.
+    Train anomaly detection using the
+    same physical/logical device only.
 
-    Simulator:
-        train using simulator data only.
+    This prevents rooms with different
+    normal power ranges from being mixed
+    into one Isolation Forest model.
     """
-
-    source = latest_row.data_source
-
-    if source == "sensor":
-
-        return {
-            "source": "sensor",
-            "device_id": latest_row.device_id,
-            "scope_type": "device"
-        }
-
-    if source == "simulator":
-
-        return {
-            "source": "simulator",
-            "device_id": None,
-            "scope_type": "source"
-        }
 
     return {
-        "source": source,
-        "device_id": latest_row.device_id,
-        "scope_type": "device"
+        "source":
+            latest_row.data_source,
+
+        "device_id":
+            latest_row.device_id,
+
+        "room_id":
+            latest_row.room_id,
+
+        "scope_type":
+            "device",
     }
-
-
 # =========================================================
 # Get Latest Reading
 # =========================================================

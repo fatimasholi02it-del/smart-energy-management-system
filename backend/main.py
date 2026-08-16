@@ -1458,9 +1458,14 @@ def optimization_comparison():
     )
 
 @app.get("/ai/anomalies")
-def ai_anomalies():
-    return detect_energy_anomalies()
-
+def ai_anomalies(
+    source: str | None = None,
+    device_id: str | None = None,
+):
+    return detect_energy_anomalies(
+        source=source,
+        device_id=device_id,
+    )
 
 @app.get("/ai/current-status")
 def ai_current_status():

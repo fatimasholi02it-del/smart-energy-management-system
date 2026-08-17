@@ -1,8 +1,6 @@
 import hmac
 import hashlib
-from pydantic import BaseModel
 
-from collections import defaultdict
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,13 +76,10 @@ import models
 from config import settings
 from database import SessionLocal, engine
 
-from monte_carlo_service import monte_carlo_prediction
-from models import EnergyReading
 
 from contextlib import asynccontextmanager
 from mqtt_consumer import start_mqtt_consumer
 
-import random
 
 
 models.Base.metadata.create_all(bind=engine)
@@ -117,7 +112,7 @@ async def lifespan(app: FastAPI):
             print("MQTT consumer stopped")
         except Exception as e:
             print(f"MQTT consumer shutdown warning: {e}")
-            
+
 app = FastAPI(
     title="Smart Energy API",
     lifespan=lifespan
@@ -231,17 +226,6 @@ def ingest_reading(
     finally:
         db.close()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-#models.Base.metadata.create_all(bind=engine)
-
-#app.include_router(router)
 
 BUILDING_ROOM_MAP = {
     "building_1": {
@@ -254,20 +238,6 @@ BUILDING_ROOM_MAP = {
     },
 }
 
-DEVICE_ROOM_MAP = {
-    "simulator_01": {
-        "room_id": "room_1",
-        "building_id": "building_1",
-    },
-    "simulator_02": {
-        "room_id": "room_2",
-        "building_id": "building_1",
-    },
-    "simulator_03": {
-        "room_id": "room_3",
-        "building_id": "building_2",
-    },
-}
 
 
 @app.get("/")
@@ -277,19 +247,6 @@ def root():
         "message": "Smart Energy backend is running - render v2"
     }
 
-def get_recent_readings(minutes: int = 60):
-    db = SessionLocal()
-    try:
-        since_time = datetime.now() - timedelta(minutes=minutes)
-        rows = (
-            db.query(models.EnergyReading)
-            .filter(models.EnergyReading.timestamp >= since_time)
-            .order_by(models.EnergyReading.timestamp.desc())
-            .all()
-        )
-        return rows
-    finally:
-        db.close()
 
 
 def get_room_stats(minutes: int = 60):
@@ -327,8 +284,7 @@ def get_room_stats(minutes: int = 60):
 
         tariff_per_kwh = 0.45
 
-        # إذا صار انقطاع طويل،
-        # ما نحسب الفترة كلها كأن الجهاز كان شغال.
+        # Do not integrate across long communication gaps.
         max_gap_seconds = 30
 
         for room_id, room_readings in (
@@ -677,7 +633,7 @@ def mobile_home():
 
 @app.get("/mobile/live-power")
 def mobile_live_power():
-    return get_live_power_summary() 
+    return get_live_power_summary()
 
 
 
@@ -1118,124 +1074,6 @@ def mobile_alerts():
         "alerts": alerts,
     }
 
-@app.get("/mobile/recommendations")
-def mobile_recommendations():
-    room_stats = get_room_stats(minutes=60)
-    recommendations = []
-
-    for room in room_stats.values():
-        avg_energy = room["average_energy"]
-
-        if avg_energy >= 3.7:
-            recommendation = "Reduce high-load devices and monitor HVAC usage closely."
-            status_level = "High"
-        elif avg_energy >= 2.5:
-            recommendation = "Monitor usage and optimize active equipment scheduling."
-            status_level = "Medium"
-        else:
-            recommendation = "Current usage is efficient. Maintain this operating pattern."
-            status_level = "Low"
-
-        recommendations.append(
-            {
-                "room_id": room["room_id"],
-                "status_level": status_level,
-                "recommendation": recommendation,
-            }
-        )
-
-    return {"recommendations": recommendations}
-
-
-@app.get("/mobile/ai-summary")
-def mobile_ai_summary():
-    room_stats = get_room_stats(minutes=120)
-    rooms = []
-
-    for room in room_stats.values():
-        avg_energy = room["average_energy"]
-        records_analyzed = room["reading_count"]
-
-        if avg_energy >= 3.7:
-            risk_level = "High"
-            anomaly_ratio_percent = 72
-            anomaly_count = max(1, int(records_analyzed * 0.72))
-        elif avg_energy >= 2.5:
-            risk_level = "Medium"
-            anomaly_ratio_percent = 38
-            anomaly_count = max(1, int(records_analyzed * 0.38))
-        else:
-            risk_level = "Low"
-            anomaly_ratio_percent = 12
-            anomaly_count = max(0, int(records_analyzed * 0.12))
-
-        rooms.append(
-            {
-                "room_id": room["room_id"],
-                "records_analyzed": records_analyzed,
-                "anomaly_count": anomaly_count,
-                "anomaly_ratio_percent": anomaly_ratio_percent,
-                "risk_level": risk_level,
-            }
-        )
-
-    top_risk_room = max(
-        rooms,
-        key=lambda r: {"Low": 1, "Medium": 2, "High": 3}.get(r["risk_level"], 0),
-        default={},
-    )
-
-    return {
-        "model": "Isolation Forest",
-        "training_records": sum(r["records_analyzed"] for r in rooms),
-        "top_risk_room": top_risk_room,
-        "rooms": rooms,
-    }
-
-
-@app.get("/mobile/device-health")
-def mobile_device_health():
-    room_stats = get_room_stats(minutes=120)
-    now = datetime.now()
-    devices = []
-
-    # لو ما عندكم جدول devices فعلي، هذه محاكاة مقنعة
-    simulators = [
-        ("simulator_01", "room_1", "building_1"),
-        ("simulator_02", "room_2", "building_1"),
-        ("simulator_03", "room_3", "building_2"),
-    ]
-
-    for device_id, room_id, building_id in simulators:
-        room = room_stats.get(room_id, {})
-        last_seen_raw = room.get("last_seen")
-
-        if last_seen_raw:
-            last_seen = datetime.fromisoformat(last_seen_raw)
-            seconds_since_last_seen = int((now - last_seen).total_seconds())
-        else:
-            last_seen = None
-            seconds_since_last_seen = 9999
-
-        if seconds_since_last_seen <= 15:
-            status = "Online"
-        elif seconds_since_last_seen <= 45:
-            status = "Delayed"
-        else:
-            status = "Offline"
-
-        devices.append(
-            {
-                "device_id": device_id,
-                "room_id": room_id,
-                "building_id": building_id,
-                "status": status,
-                "last_seen": last_seen.isoformat() if last_seen else "N/A",
-                "seconds_since_last_seen": seconds_since_last_seen,
-            }
-        )
-
-    return {"devices": devices}
 
 
 @app.get("/mobile/energy-trading")
@@ -1243,36 +1081,6 @@ def mobile_energy_trading():
     return build_energy_trading()
 
 
-def predict_energy(room_id: str):
-    db = SessionLocal()
-
-    try:
-        rows = (
-            db.query(EnergyReading.energy)
-            .filter(EnergyReading.room_id == room_id)
-            .order_by(EnergyReading.id.desc())
-            .limit(50)
-            .all()
-        )
-
-        values = [r[0] for r in rows]
-
-        result = monte_carlo_prediction(values)
-
-        if not result:
-            return {
-                "room_id": room_id,
-                "message": "No data available"
-            }
-
-        return {
-            "room_id": room_id,
-            "input_points": len(values),
-            "prediction": result
-        }
-
-    finally:
-        db.close()
 
 
 
@@ -1299,18 +1107,6 @@ def mobile_recommendations_smart():
 def smart_planning_health():
     return build_planning_health()
 
-def monte_carlo_simulation(base_value: float, iterations: int = 1000):
-    results = []
-
-    for _ in range(iterations):
-        noise = random.uniform(-0.3, 0.3)
-        results.append(base_value + noise)
-
-    expected = sum(results) / len(results)
-    min_val = min(results)
-    max_val = max(results)
-
-    return expected, min_val, max_val
 
 
 @app.get("/forecast/solar")
@@ -1547,9 +1343,6 @@ def dashboard_status():
 
     return get_dashboard_status()
 
-from dashboard_service import (
-    get_dashboard_status
-)
 
 
 @app.get("/devices")
@@ -1598,7 +1391,6 @@ def energy_readings(
         "items": data
     }
 
-from security_service import get_security_events
 
 
 @app.get("/security/events")
@@ -1631,16 +1423,3 @@ def alerts(
         "total": len(data),
         "items": data
     }
-
-print("\n================ REGISTERED ROUTES ================")
-
-for route in app.routes:
-    print(
-        getattr(route, "path", "NO_PATH"),
-        getattr(route, "methods", "")
-    )
-
-print("===================================================\n")
-
-
-

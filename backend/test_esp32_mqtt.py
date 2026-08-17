@@ -1,8 +1,9 @@
-import json
-import hmac
 import hashlib
-import time
+import hmac
+import json
+import os
 import threading
+
 from datetime import datetime
 
 import paho.mqtt.client as mqtt
@@ -10,175 +11,394 @@ import paho.mqtt.client as mqtt
 from config import settings
 
 
+# =====================================================
+# ESP32 Test Configuration
+# =====================================================
+
 DEVICE_ID = "esp32_01"
 ROOM_ID = "room_1"
 
-POWER_KW = 20.0
+# Normal valid test values.
+POWER_KW = 3.0
 ENERGY_KWH = 15.42
 
 
-connected_event = threading.Event()
+# =====================================================
+# Runtime State
+# =====================================================
 
+mqtt_connected = threading.Event()
+
+
+# =====================================================
+# MQTT Callbacks
+# =====================================================
 
 def on_connect(
     client,
     userdata,
     flags,
     reason_code,
-    properties=None
+    properties,
 ):
-
     print(
-        f"Publisher connected: {reason_code}"
+        f"MQTT connection result: "
+        f"{reason_code}"
     )
 
     if reason_code == 0:
-        connected_event.set()
+        mqtt_connected.set()
+
+        print(
+            "ESP32 MQTT test connected "
+            "successfully."
+        )
+
+    else:
+        mqtt_connected.clear()
+
+        print(
+            f"MQTT connection failed: "
+            f"{reason_code}"
+        )
 
 
-# =====================================================
-# Build payload
-# =====================================================
-
-timestamp = datetime.now().isoformat()
-
-signing_string = (
-    f"{DEVICE_ID}|"
-    f"{ROOM_ID}|"
-    f"{POWER_KW}|"
-    f"{ENERGY_KWH}|"
-    f"{timestamp}"
-)
-
-signature = hmac.new(
-    settings.message_secret.encode(),
-    signing_string.encode(),
-    hashlib.sha256
-).hexdigest()
-
-payload = {
-    "device_id": DEVICE_ID,
-    "room_id": ROOM_ID,
-    "power_kw": POWER_KW,
-    "energy_kwh": ENERGY_KWH,
-    "timestamp": timestamp,
-    "signature": signature
-}
-
-
-print()
-print("Signing string:")
-print(signing_string)
-
-print()
-print("Payload:")
-print(
-    json.dumps(
-        payload,
-        indent=2
-    )
-)
-
-
-# =====================================================
-# MQTT
-# =====================================================
-
-client = mqtt.Client(
-    mqtt.CallbackAPIVersion.VERSION2
-)
-
-client.on_connect = on_connect
-
-
-if (
-    settings.mqtt_username
-    and settings.mqtt_password
+def on_disconnect(
+    client,
+    userdata,
+    disconnect_flags,
+    reason_code,
+    properties,
 ):
+    mqtt_connected.clear()
+
+    print(
+        f"MQTT disconnected: "
+        f"{reason_code}"
+    )
+
+
+def on_connect_fail(
+    client,
+    userdata,
+):
+    mqtt_connected.clear()
+
+    print(
+        "MQTT connection attempt failed."
+    )
+
+
+# =====================================================
+# HMAC Signature
+# =====================================================
+
+def build_signing_string(
+    payload: dict,
+) -> str:
+    return (
+        f"{payload['device_id']}|"
+        f"{payload['room_id']}|"
+        f"{payload['power_kw']}|"
+        f"{payload['energy_kwh']}|"
+        f"{payload['timestamp']}"
+    )
+
+
+def generate_signature(
+    payload: dict,
+) -> str:
+    signing_string = (
+        build_signing_string(
+            payload
+        )
+    )
+
+    return hmac.new(
+        settings.message_secret.encode(),
+        signing_string.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+# =====================================================
+# Payload
+# =====================================================
+
+def build_payload() -> dict:
+    payload = {
+        "device_id":
+            DEVICE_ID,
+
+        "room_id":
+            ROOM_ID,
+
+        "power_kw":
+            POWER_KW,
+
+        "energy_kwh":
+            ENERGY_KWH,
+
+        "timestamp":
+            datetime.now().isoformat(),
+    }
+
+    payload["signature"] = (
+        generate_signature(
+            payload
+        )
+    )
+
+    return payload
+
+
+# =====================================================
+# Main
+# =====================================================
+
+def main():
+    mqtt_connected.clear()
+
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=(
+            f"esp32-valid-message-test-"
+            f"{os.getpid()}"
+        ),
+    )
+
+    client.on_connect = (
+        on_connect
+    )
+
+    client.on_disconnect = (
+        on_disconnect
+    )
+
+    client.on_connect_fail = (
+        on_connect_fail
+    )
+
+    # ---------------------------------------------
+    # Authentication
+    # ---------------------------------------------
 
     client.username_pw_set(
         settings.mqtt_username,
-        settings.mqtt_password
+        settings.mqtt_password,
     )
+
+    # ---------------------------------------------
+    # TLS
+    # ---------------------------------------------
 
     client.tls_set()
 
-
-print()
-print("Connecting to MQTT broker...")
-
-
-client.connect(
-    settings.mqtt_broker_host,
-    settings.mqtt_broker_port,
-    60
-)
-
-
-client.loop_start()
-
-
-# =====================================================
-# Wait until broker connection is confirmed
-# =====================================================
-
-if not connected_event.wait(timeout=10):
-
     print(
-        "ERROR: Could not connect to MQTT broker."
+        "ESP32 Valid MQTT Message Test"
     )
 
-    client.loop_stop()
-    client.disconnect()
+    print(
+        "-" * 60
+    )
 
-    raise SystemExit(1)
+    print(
+        f"Device: {DEVICE_ID}"
+    )
+
+    print(
+        f"Room: {ROOM_ID}"
+    )
+
+    print(
+        f"Broker: "
+        f"{settings.mqtt_broker_host}:"
+        f"{settings.mqtt_broker_port}"
+    )
+
+    print(
+        f"Topic: "
+        f"{settings.mqtt_topic}"
+    )
+
+    print(
+        "TLS: enabled"
+    )
+
+    try:
+        # -----------------------------------------
+        # Connect
+        # -----------------------------------------
+
+        client.connect(
+            settings.mqtt_broker_host,
+            settings.mqtt_broker_port,
+            60,
+        )
+
+        client.loop_start()
+
+        print(
+            "Waiting for MQTT connection..."
+        )
+
+        if not mqtt_connected.wait(
+            timeout=15
+        ):
+            print(
+                "Could not establish MQTT "
+                "connection within 15 seconds."
+            )
+
+            return
+
+        # -----------------------------------------
+        # Build payload
+        # -----------------------------------------
+
+        payload = (
+            build_payload()
+        )
+
+        message = json.dumps(
+            payload
+        )
+
+        print()
+        print(
+            "Publishing valid ESP32 reading..."
+        )
+
+        print(
+            f"Device: "
+            f"{payload['device_id']}"
+        )
+
+        print(
+            f"Room: "
+            f"{payload['room_id']}"
+        )
+
+        print(
+            f"Power: "
+            f"{payload['power_kw']} kW"
+        )
+
+        print(
+            f"Energy: "
+            f"{payload['energy_kwh']} kWh"
+        )
+
+        print(
+            f"Timestamp: "
+            f"{payload['timestamp']}"
+        )
+
+        print(
+            "Signature: valid HMAC "
+            "(hidden from console)"
+        )
+
+        # -----------------------------------------
+        # Publish
+        # -----------------------------------------
+
+        result = client.publish(
+            settings.mqtt_topic,
+            message,
+            qos=1,
+        )
+
+        if (
+            result.rc
+            != mqtt.MQTT_ERR_SUCCESS
+        ):
+            print(
+                f"Publish failed. "
+                f"rc={result.rc}"
+            )
+
+            return
+
+        result.wait_for_publish(
+            timeout=5
+        )
+
+        if not result.is_published():
+            print(
+                "MQTT broker did not confirm "
+                "publication."
+            )
+
+            return
+
+        print()
+        print(
+            "ESP32 test message published "
+            "successfully."
+        )
+
+        print()
+        print(
+            "Expected backend behavior:"
+        )
+
+        print(
+            "  1. Validate the HMAC signature."
+        )
+
+        print(
+            "  2. Recognize esp32_01 as "
+            "a trusted sensor."
+        )
+
+        print(
+            "  3. Accept the room mapping."
+        )
+
+        print(
+            "  4. Store power_kw and "
+            "energy_kwh."
+        )
+
+        print(
+            "  5. Update device health."
+        )
+
+        print(
+            "  6. Make the reading available "
+            "to the mobile application."
+        )
+
+    except Exception as e:
+        print(
+            f"ESP32 MQTT test failed: {e}"
+        )
+
+    finally:
+        mqtt_connected.clear()
+
+        if client.is_connected():
+            try:
+                client.disconnect()
+            except Exception as e:
+                print(
+                    f"Disconnect warning: {e}"
+                )
+
+        try:
+            client.loop_stop()
+        except Exception:
+            pass
+
+        print(
+            "ESP32 MQTT test finished."
+        )
 
 
 # =====================================================
-# Publish
+# Entry Point
 # =====================================================
 
-print(
-    f"Publishing to topic: "
-    f"{settings.mqtt_topic}"
-)
-
-
-result = client.publish(
-    settings.mqtt_topic,
-    json.dumps(payload),
-    qos=1
-)
-
-
-result.wait_for_publish(
-    timeout=10
-)
-
-
-if result.is_published():
-
-    print()
-    print(
-        "ESP32 test message published successfully."
-    )
-
-else:
-
-    print()
-    print(
-        "ERROR: ESP32 test message was not published."
-    )
-
-
-# Give broker/client a moment to finish QoS handshake
-time.sleep(2)
-
-
-client.loop_stop()
-client.disconnect()
-
-
-print(
-    "Publisher disconnected."
-)
+if __name__ == "__main__":
+    main()

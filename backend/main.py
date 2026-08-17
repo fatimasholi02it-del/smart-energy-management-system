@@ -414,7 +414,7 @@ def get_room_stats(minutes: int = 60):
 
             total_energy_kwh = round(
                 total_energy_kwh,
-                3,
+                6,
             )
 
             if average_power_kw >= 3.5:
@@ -429,7 +429,7 @@ def get_room_stats(minutes: int = 60):
             estimated_cost = round(
                 total_energy_kwh
                 * tariff_per_kwh,
-                2,
+                4,
             )
 
             utilization_percent = min(
@@ -601,7 +601,7 @@ def mobile_home():
     rooms = list(room_stats.values())
 
     top_consumer = max(rooms, key=lambda r: r["average_energy"], default=None)
-    total_cost = round(sum(r["estimated_cost"] for r in rooms), 2)
+    total_cost = round(sum(r["estimated_cost"] for r in rooms), 4)
 
     high_risk_count = len([r for r in rooms if r["average_energy"] >= 3.5])
     medium_risk_count = len([r for r in rooms if 2.3 <= r["average_energy"] < 3.5])

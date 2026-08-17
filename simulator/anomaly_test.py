@@ -52,6 +52,23 @@ MESSAGE_SECRET = os.getenv(
 
 
 # =====================================================
+# Test Configuration
+# =====================================================
+
+TEST_DEVICE_ID = "simulator_02"
+TEST_ROOM_ID = "room_2"
+
+# simulator_02 normally generates approximately
+# 1.8 - 3.5 kW.
+#
+# This test intentionally sends a lower reading
+# so the message remains correctly signed and trusted,
+# but its energy value is unusual compared with the
+# device's normal learned behavior.
+ANOMALY_ENERGY_KW = 1.5
+
+
+# =====================================================
 # Runtime State
 # =====================================================
 
@@ -92,7 +109,7 @@ def validate_environment() -> bool:
 
     if missing_variables:
         print(
-            "Replay attack test configuration error."
+            "Anomaly test configuration error."
         )
 
         print(
@@ -117,7 +134,7 @@ def validate_environment() -> bool:
         or BROKER_PORT > 65535
     ):
         print(
-            "Replay attack test configuration error: "
+            "Anomaly test configuration error: "
             "MQTT_BROKER_PORT is invalid."
         )
 
@@ -205,22 +222,22 @@ def generate_signature(
 
 
 # =====================================================
-# Replay Payload
+# Anomaly Payload
 # =====================================================
 
-def build_valid_payload() -> dict:
+def build_anomaly_payload() -> dict:
     payload = {
         "device_id":
-            "simulator_01",
+            TEST_DEVICE_ID,
 
         "room_id":
-            "room_1",
+            TEST_ROOM_ID,
 
         # Legacy simulator contract:
-        # energy currently represents
+        # "energy" currently represents
         # instantaneous power in kW.
         "energy":
-            3.20,
+            ANOMALY_ENERGY_KW,
 
         "timestamp":
             datetime.now().isoformat(),
@@ -236,101 +253,6 @@ def build_valid_payload() -> dict:
 
 
 # =====================================================
-# Publish Helper
-# =====================================================
-
-def publish_message(
-    client,
-    payload: dict,
-    label: str,
-) -> bool:
-    if not client.is_connected():
-        print(
-            f"{label} could not be published "
-            "because MQTT is disconnected."
-        )
-
-        return False
-
-    message = json.dumps(
-        payload
-    )
-
-    print()
-    print(
-        f"{label}:"
-    )
-
-    print(
-        f"  Device: "
-        f"{payload['device_id']}"
-    )
-
-    print(
-        f"  Room: "
-        f"{payload['room_id']}"
-    )
-
-    print(
-        f"  Energy: "
-        f"{payload['energy']} kW"
-    )
-
-    print(
-        f"  Timestamp: "
-        f"{payload['timestamp']}"
-    )
-
-    print(
-        "  Signature: valid HMAC "
-        "(hidden from console)"
-    )
-
-    try:
-        result = client.publish(
-            TOPIC,
-            message,
-            qos=1,
-        )
-
-        if (
-            result.rc
-            != mqtt.MQTT_ERR_SUCCESS
-        ):
-            print(
-                f"{label} publish failed. "
-                f"rc={result.rc}"
-            )
-
-            return False
-
-        result.wait_for_publish(
-            timeout=5
-        )
-
-        if result.is_published():
-            print(
-                f"{label} published successfully."
-            )
-
-            return True
-
-        print(
-            f"{label} was not confirmed "
-            "by the MQTT broker."
-        )
-
-        return False
-
-    except Exception as e:
-        print(
-            f"{label} publish error: {e}"
-        )
-
-        return False
-
-
-# =====================================================
 # Main
 # =====================================================
 
@@ -343,7 +265,7 @@ def main():
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
         client_id=(
-            f"replay-attack-test-"
+            f"anomaly-detection-test-"
             f"{os.getpid()}"
         ),
     )
@@ -372,7 +294,7 @@ def main():
     client.tls_set()
 
     print(
-        "Replay Attack Security Test"
+        "AI Anomaly Detection Test"
     )
 
     print(
@@ -419,163 +341,165 @@ def main():
 
             return
 
-        # =========================================
-        # Build ONE valid message
-        # =========================================
+        # -----------------------------------------
+        # Build valid unusual reading
+        # -----------------------------------------
 
         payload = (
-            build_valid_payload()
+            build_anomaly_payload()
         )
 
-        # =========================================
-        # STEP 1
-        # Send original message
-        # =========================================
+        message = json.dumps(
+            payload
+        )
 
         print()
         print(
-            "=" * 60
+            "Publishing valid but unusual "
+            "energy reading..."
         )
 
         print(
-            "STEP 1: Send original valid message"
+            f"Device: "
+            f"{payload['device_id']}"
         )
 
         print(
-            "=" * 60
+            f"Room: "
+            f"{payload['room_id']}"
         )
 
-        first_ok = publish_message(
-            client,
-            payload,
-            "Original message",
+        print(
+            f"Energy: "
+            f"{payload['energy']} kW"
         )
 
-        if not first_ok:
+        print(
+            f"Timestamp: "
+            f"{payload['timestamp']}"
+        )
+
+        print(
+            "Signature: valid HMAC "
+            "(hidden from console)"
+        )
+
+        print()
+        print(
+            "This message is intentionally "
+            "different from a security attack:"
+        )
+
+        print(
+            "  - Device is trusted."
+        )
+
+        print(
+            "  - Room mapping is correct."
+        )
+
+        print(
+            "  - Signature is valid."
+        )
+
+        print(
+            "  - Energy value is intentionally "
+            "unusual."
+        )
+
+        # -----------------------------------------
+        # Publish
+        # -----------------------------------------
+
+        result = client.publish(
+            TOPIC,
+            message,
+            qos=1,
+        )
+
+        if (
+            result.rc
+            != mqtt.MQTT_ERR_SUCCESS
+        ):
             print(
-                "Original message was not "
-                "published successfully."
+                f"Publish failed. "
+                f"rc={result.rc}"
+            )
+
+            return
+
+        result.wait_for_publish(
+            timeout=5
+        )
+
+        if not result.is_published():
+            print(
+                "Broker did not confirm "
+                "publication."
             )
 
             return
 
         print()
         print(
-            "Expected backend behavior:"
+            "Unusual reading published "
+            "successfully."
         )
-
-        print(
-            "  - Accept this message as a "
-            "valid trusted reading."
-        )
-
-        # Give the backend enough time to
-        # process and record the first message.
-        time.sleep(
-            3
-        )
-
-        # =========================================
-        # STEP 2
-        # Replay EXACT same message
-        # =========================================
 
         print()
         print(
-            "=" * 60
+            "Expected processing flow:"
         )
 
         print(
-            "STEP 2: Replay EXACT SAME message"
+            "  1. HMAC validation succeeds."
         )
 
         print(
-            "=" * 60
+            "  2. Trusted-device validation succeeds."
         )
 
         print(
-            "The following values are intentionally "
-            "unchanged:"
+            "  3. Reading reaches the normal "
+            "energy-processing pipeline."
         )
 
         print(
-            "  - device_id"
+            "  4. AI anomaly detection evaluates "
+            "the reading."
         )
 
         print(
-            "  - room_id"
+            "  5. Isolation Forest may classify "
+            "the reading as anomalous based on "
+            "the learned device pattern."
         )
-
-        print(
-            "  - energy"
-        )
-
-        print(
-            "  - timestamp"
-        )
-
-        print(
-            "  - signature"
-        )
-
-        replay_ok = publish_message(
-            client,
-            payload,
-            "Replay message",
-        )
-
-        if not replay_ok:
-            print(
-                "Replay message could not be "
-                "published to the broker."
-            )
-
-            return
 
         print()
         print(
-            "Expected backend behavior:"
+            "Important:"
         )
 
         print(
-            "  1. Detect that this exact "
-            "message was already processed."
+            "Anomaly detection is statistical, "
+            "so classification must be verified "
+            "from the AI endpoint or AI Center."
         )
 
-        print(
-            "  2. Reject the second reading."
-        )
-
-        print(
-            "  3. Record a replay-attack "
-            "security event."
-        )
-
-        print(
-            "  4. Do not store the replayed "
-            "reading as trusted energy data."
-        )
-
-        # Allow backend processing before
-        # shutting down the MQTT client.
+        # Give the backend time to process
+        # and persist the reading.
         time.sleep(
             3
         )
 
         print()
         print(
-            "Replay attack test completed."
-        )
-
-        print(
-            "Verify the result using the "
-            "Security Center or backend "
-            "security events endpoint."
+            "Anomaly detection test completed."
         )
 
     except Exception as e:
         print(
-            f"Replay attack test failed: {e}"
+            f"Anomaly test failed: {e}"
         )
 
     finally:
@@ -595,7 +519,7 @@ def main():
             pass
 
         print(
-            "Replay attack test finished."
+            "Anomaly detection test finished."
         )
 
 

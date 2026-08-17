@@ -1,21 +1,35 @@
 import csv
 import math
 import random
+
 from datetime import datetime, timedelta
 
+
+# =====================================================
+# Dataset Configuration
+# =====================================================
 
 OUTPUT_FILE = "ml_training_data.csv"
 
 DAYS_TO_GENERATE = 30
 
-START_DATE = datetime.now() - timedelta(
-    days=DAYS_TO_GENERATE
+START_DATE = (
+    datetime.now()
+    - timedelta(
+        days=DAYS_TO_GENERATE
+    )
 )
 
 
-def get_base_load(hour: int) -> float:
+# =====================================================
+# Daily Load Profile
+# =====================================================
+
+def get_base_load(
+    hour: int,
+) -> float:
     """
-    نمط يومي مبسط وواقعي.
+    Simplified realistic daily load profile.
 
     00-05 : Low
     06-08 : Morning rise
@@ -43,23 +57,37 @@ def get_base_load(hour: int) -> float:
     return 2.7
 
 
+# =====================================================
+# Generate Synthetic Reading
+# =====================================================
+
 def generate_energy(
     timestamp: datetime,
-    previous_energy: float
+    previous_energy: float,
 ) -> float:
     hour = timestamp.hour
 
-    base_load = get_base_load(
-        hour
+    base_load = (
+        get_base_load(
+            hour
+        )
     )
 
-    # Weekend factor
-    weekday = timestamp.weekday()
+    # ---------------------------------------------
+    # Weekend influence
+    # ---------------------------------------------
+
+    weekday = (
+        timestamp.weekday()
+    )
 
     if weekday >= 5:
         base_load *= 0.85
 
+    # ---------------------------------------------
     # Smooth hourly pattern
+    # ---------------------------------------------
+
     sinusoidal_component = (
         0.15
         * math.sin(
@@ -69,21 +97,31 @@ def generate_energy(
         )
     )
 
-    # Temperature-like daily influence
+    # ---------------------------------------------
+    # Temperature-like daytime influence
+    # ---------------------------------------------
+
     if 12 <= hour <= 18:
         temperature_effect = 0.20
     else:
         temperature_effect = 0.0
 
-    # Dependency on previous reading
+    # ---------------------------------------------
+    # Previous-reading dependency
+    # ---------------------------------------------
+
     previous_effect = (
         previous_energy
         * 0.15
     )
 
+    # ---------------------------------------------
+    # Random variation
+    # ---------------------------------------------
+
     noise = random.gauss(
         0,
-        0.12
+        0.12,
     )
 
     value = (
@@ -94,26 +132,38 @@ def generate_energy(
         + noise
     )
 
+    # ---------------------------------------------
     # Rare realistic spike
+    # ---------------------------------------------
+
     if random.random() < 0.015:
         value += random.uniform(
             0.3,
-            0.7
+            0.7,
         )
 
     return round(
-        max(value, 0.5),
-        3
+        max(
+            value,
+            0.5,
+        ),
+        3,
     )
 
+
+# =====================================================
+# Generate Dataset
+# =====================================================
 
 def generate_dataset():
     rows = []
 
-    current_time = START_DATE.replace(
-        minute=0,
-        second=0,
-        microsecond=0
+    current_time = (
+        START_DATE.replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
     )
 
     previous_energy = 2.0
@@ -126,24 +176,28 @@ def generate_dataset():
     for _ in range(
         total_hours
     ):
-        energy = generate_energy(
-            current_time,
-            previous_energy
+        energy = (
+            generate_energy(
+                current_time,
+                previous_energy,
+            )
         )
 
-        rows.append({
-            "timestamp":
-                current_time.isoformat(),
+        rows.append(
+            {
+                "timestamp":
+                    current_time.isoformat(),
 
-            "energy":
-                energy,
+                "energy":
+                    energy,
 
-            "hour":
-                current_time.hour,
+                "hour":
+                    current_time.hour,
 
-            "weekday":
-                current_time.weekday()
-        })
+                "weekday":
+                    current_time.weekday(),
+            }
+        )
 
         previous_energy = (
             energy
@@ -153,21 +207,24 @@ def generate_dataset():
             hours=1
         )
 
+    # ---------------------------------------------
+    # Save CSV
+    # ---------------------------------------------
+
     with open(
         OUTPUT_FILE,
         "w",
         newline="",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         writer = csv.DictWriter(
             file,
             fieldnames=[
                 "timestamp",
                 "energy",
                 "hour",
-                "weekday"
-            ]
+                "weekday",
+            ],
         )
 
         writer.writeheader()
@@ -186,6 +243,10 @@ def generate_dataset():
         f"{OUTPUT_FILE}"
     )
 
+
+# =====================================================
+# Entry Point
+# =====================================================
 
 if __name__ == "__main__":
     generate_dataset()
